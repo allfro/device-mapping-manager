@@ -1,0 +1,72 @@
+{
+  "Args": {
+    "Description": "",
+    "Name": "",
+    "Settable": null,
+    "Value": null
+  },
+  "Description": "A device mapping plugin for swarm clusters",
+  "Documentation": "https://docs.docker.com/engine/extend/plugins/",
+  "Entrypoint": [
+    "/dvd"
+  ],
+  "Env": [
+    {
+      "Description": "",
+      "Name": "DEBUG",
+      "Settable": [
+        "value"
+      ],
+      "Value": "0"
+    }
+  ],
+  "Interface": {
+    "Socket": "dvd.sock",
+    "Types": [
+      "docker.volumedriver/1.0"
+    ]
+  },
+  "Linux": {
+    "Capabilities": [
+      "CAP_SYS_ADMIN"
+    ],
+    "AllowAllDevices": true,
+    "Devices": null
+  },
+  "Mounts": [
+    {
+      "source": "/sys/fs/cgroup",
+      "destination": "/sys/fs/cgroup",
+      "options": [
+        "bind",
+        "rw"
+      ],
+      "type": "cgroup"
+    },
+    {
+      "destination": "/dev",
+      "source": "/dev",
+      "options": [
+        "bind",
+        "rw"
+      ],
+      "type": "bind"
+    },
+    {
+      "destination": "/var/run/docker.sock",
+      "source": "/var/run/docker.sock",
+      "options": [
+        "bind",
+        "ro",
+        "private"
+      ],
+      "type": "bind"
+    }
+  ],
+  "Network": {
+    "Type": ""
+  },
+  "PropagatedMount": "/dev",
+  "User": {},
+  "Workdir": "/"
+}

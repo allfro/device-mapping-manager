@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/client"
 	"github.com/docker/go-plugins-helpers/volume"
+	_ "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"log"
 	"os"
@@ -12,7 +17,7 @@ import (
 	"time"
 )
 
-const pluginId = "device-volume-driver"
+const pluginId = "dvd"
 
 func main() {
 	driver := DeviceVolumeDriver()
@@ -20,7 +25,9 @@ func main() {
 	log.Println(handler.ServeUnix(pluginId, 0))
 }
 
-type deviceVolumeDriver struct{}
+type deviceVolumeDriver struct {
+	*client.Client
+}
 
 type mountPoint struct {
 	name   string
@@ -88,11 +95,27 @@ func (d deviceVolumeDriver) Mount(request *volume.MountRequest) (*volume.MountRe
 
 	go func() {
 		time.Sleep(time.Second * 1)
-		devicesAllowPath := path.Join("/sys/fs/cgroup/devices/docker", request.ID, "devices.allow")
+		filter := filters.NewArgs(filters.KeyValuePair{Key: "volume", Value: request.Name})
+
+		containers, err := d.ContainerList(
+			context.Background(),
+			types.ContainerListOptions{Filters: filter},
+		)
+
+		if err != nil {
+			log.Println(err)
+			return
+		} else if len(containers) == 0 {
+			log.Println("aborting: could not find container that uses volume " + mountPoint.name)
+			return
+		}
+
+		devicesAllowPath := path.Join("/sys/fs/cgroup/devices/docker", containers[0].ID, "devices.allow")
 
 		if _, err := os.Stat(devicesAllowPath); os.IsNotExist(err) {
 			//return nil, errors.New("could not find cgroup `devices.allow` file for specified container: " + devicesAllowPath)
 			log.Println(errors.New("could not find cgroup `devices.allow` file for specified container: " + devicesAllowPath))
+			return
 		}
 
 		var stat unix.Stat_t
@@ -100,14 +123,18 @@ func (d deviceVolumeDriver) Mount(request *volume.MountRequest) (*volume.MountRe
 		if err := unix.Stat(mountPoint.device, &stat); err != nil {
 			//return nil, err
 			log.Println(err)
+			return
 		}
 
 		dev := uint64(stat.Rdev)
-		input := fmt.Sprintf("c %i:%i rwm\n", unix.Major(dev), unix.Minor(dev))
+		input := fmt.Sprintf("c %d:%d rwm\n", unix.Major(dev), unix.Minor(dev))
+
+		log.Println("Whitelisting `" + mountPoint.device + "` in `" + devicesAllowPath + "`")
 
 		if err := os.WriteFile(devicesAllowPath, []byte(input), 0400); err != nil {
 			//return nil, err
 			log.Println(err)
+			return
 		}
 	}()
 
@@ -122,6 +149,39 @@ func (d deviceVolumeDriver) Capabilities() *volume.CapabilitiesResponse {
 	return &volume.CapabilitiesResponse{Capabilities: volume.Capability{Scope: "local"}}
 }
 
+type pointer64 *int64
+
 func DeviceVolumeDriver() *deviceVolumeDriver {
-	return &deviceVolumeDriver{}
+	cli, err := client.NewClientWithOpts(client.FromEnv)
+
+	if err != nil {
+		panic(err)
+	}
+
+	//m, err := cgroup2.LoadSystemd("/system.slice", "docker-9ac190cfc7040ffb1a56315b0c4aba9a554e72aa43164c4b94e84ee5ae3d07d9.scope")
+	//
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	//
+	//major := int64(10)
+	//minor := int64(229)
+	//err = m.Update(&cgroup2.Resources{
+	//	Devices: []specs.LinuxDeviceCgroup{
+	//		{
+	//			Allow:  true,
+	//			Type:   "c",
+	//			Major:  &major,
+	//			Minor:  &minor,
+	//			Access: "rwm",
+	//		},
+	//	},
+	//})
+	//
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+	//
+	//os.Exit(0)
+	return &deviceVolumeDriver{cli}
 }

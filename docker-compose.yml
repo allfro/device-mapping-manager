@@ -1,0 +1,15 @@
+version: "3.8"
+
+volumes:
+  fuse:
+    driver: redcanari/device-volume-driver
+    driver_opts:
+      device: /dev/fuse
+
+services:
+  rdesktop:
+    image: lscr.io/linuxserver/rdesktop:ubuntu-xfce
+    volumes:
+      - fuse:/dev/fuse
+    ports:
+      - 3390:3389
