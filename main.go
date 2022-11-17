@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/containerd/cgroups/v3"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -120,14 +121,25 @@ func (d deviceVolumeDriver) Mount(request *volume.MountRequest) (*volume.MountRe
 
 		var stat unix.Stat_t
 
-		if err := unix.Stat(mountPoint.device, &stat); err != nil {
+		if err := unix.Lstat(mountPoint.device, &stat); err != nil {
 			//return nil, err
 			log.Println(err)
 			return
 		}
 
-		dev := uint64(stat.Rdev)
-		input := fmt.Sprintf("c %d:%d rwm\n", unix.Major(dev), unix.Minor(dev))
+		var deviceType string
+
+		switch stat.Mode & unix.S_IFMT {
+		case unix.S_IFBLK:
+			deviceType = "b"
+		case unix.S_IFCHR:
+			deviceType = "c"
+		default:
+			log.Println("aborting: device is neither a character or block device")
+			return
+		}
+
+		input := fmt.Sprintf("%s %d:%d rwm\n", deviceType, unix.Major(stat.Rdev), unix.Minor(stat.Rdev))
 
 		log.Println("Whitelisting `" + mountPoint.device + "` in `" + devicesAllowPath + "`")
 
@@ -149,39 +161,16 @@ func (d deviceVolumeDriver) Capabilities() *volume.CapabilitiesResponse {
 	return &volume.CapabilitiesResponse{Capabilities: volume.Capability{Scope: "local"}}
 }
 
-type pointer64 *int64
-
 func DeviceVolumeDriver() *deviceVolumeDriver {
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
-	//m, err := cgroup2.LoadSystemd("/system.slice", "docker-9ac190cfc7040ffb1a56315b0c4aba9a554e72aa43164c4b94e84ee5ae3d07d9.scope")
-	//
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//
-	//major := int64(10)
-	//minor := int64(229)
-	//err = m.Update(&cgroup2.Resources{
-	//	Devices: []specs.LinuxDeviceCgroup{
-	//		{
-	//			Allow:  true,
-	//			Type:   "c",
-	//			Major:  &major,
-	//			Minor:  &minor,
-	//			Access: "rwm",
-	//		},
-	//	},
-	//})
-	//
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-	//
-	//os.Exit(0)
+	if cgroups.Mode() == cgroups.Unified {
+		log.Fatal(errors.New("cgroupv2 is not supported"))
+	}
+
 	return &deviceVolumeDriver{cli}
 }

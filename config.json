@@ -35,13 +35,13 @@
   },
   "Mounts": [
     {
-      "source": "/sys/fs/cgroup",
-      "destination": "/sys/fs/cgroup",
+      "source": "/sys/fs/cgroup/devices",
+      "destination": "/sys/fs/cgroup/devices",
       "options": [
-        "bind",
-        "rw"
+        "rw",
+        "rbind"
       ],
-      "type": "cgroup"
+      "type": "rbind"
     },
     {
       "destination": "/dev",
