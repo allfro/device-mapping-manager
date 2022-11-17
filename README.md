@@ -28,7 +28,7 @@ volumes:
 
 services:
   rdesktop:
-    image: ldr.rc.ai/redcanari/rdesktop
+    image: lscr.io/linuxserver/rdesktop
     volumes:
       - dev_fuse:/dev/fuse
       - dev_dri_card0:/dev/dri/card0
