@@ -12,27 +12,11 @@ for cgroupv2 are welcome.
 ```yaml
 version: "3.8"
 
-volumes:
-  dev_fuse:
-    driver: redcanari/dvd
-    driver_opts:
-      device: /dev/fuse
-  dev_dri_card0:
-    driver: redcanari/dvd
-    driver_opts:
-      device: /dev/dri/card0
-  dev_dri_renderD128:
-    driver: redcanari/dvd
-    driver_opts:
-      device: /dev/dri/renderD128
-
 services:
   rdesktop:
     image: lscr.io/linuxserver/rdesktop
     volumes:
-      - dev_fuse:/dev/fuse
-      - dev_dri_card0:/dev/dri/card0
-      - dev_dri_renderD128:/dev/dri/renderD128
+      - /dev/dri:/dev/dri
     ports:
       - 3389:3389
 
