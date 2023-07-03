@@ -1,176 +1,180 @@
+//go:build linux
+
 package main
 
+// #include "ctypes.h"
+import "C"
 import (
 	"context"
-	"errors"
+	"device-volume-driver/internal/cgroup"
 	"fmt"
-	"github.com/containerd/cgroups/v3"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	"github.com/docker/go-plugins-helpers/volume"
 	_ "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 	"log"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
-	"time"
 )
 
 const pluginId = "dvd"
+const rootPath = "/host"
+
+func Ptr[T any](v T) *T {
+	return &v
+}
 
 func main() {
-	driver := DeviceVolumeDriver()
-	handler := volume.NewHandler(driver)
-	log.Println(handler.ServeUnix(pluginId, 0))
+	listenForMounts()
 }
 
-type deviceVolumeDriver struct {
-	*client.Client
-}
+func getDeviceInfo(devicePath string) (string, int64, int64, error) {
+	var stat unix.Stat_t
 
-type mountPoint struct {
-	name   string
-	device string
-}
-
-var mountPoints = make(map[string]mountPoint)
-
-func (d deviceVolumeDriver) Create(request *volume.CreateRequest) error {
-	device, ok := request.Options["device"]
-
-	if !ok {
-		return errors.New("you must specify the `device` option")
+	if err := unix.Lstat(devicePath, &stat); err != nil {
+		log.Println(err)
+		return "", -1, -1, err
 	}
 
-	mountPoints[request.Name] = mountPoint{
-		name:   strings.Clone(request.Name),
-		device: strings.Clone(device),
+	var deviceType string
+
+	switch stat.Mode & unix.S_IFMT {
+	case unix.S_IFBLK:
+		deviceType = "b"
+	case unix.S_IFCHR:
+		deviceType = "c"
+	default:
+		log.Println("aborting: device is neither a character or block device")
+		return "", -1, -1, fmt.Errorf("unsupported device type... aborting")
 	}
 
-	return nil
+	major := int64(unix.Major(stat.Rdev))
+	minor := int64(unix.Minor(stat.Rdev))
+
+	log.Printf("Found device: %s %s %d:%d\n", devicePath, deviceType, major, minor)
+
+	return deviceType, major, minor, nil
 }
 
-func (d deviceVolumeDriver) List() (*volume.ListResponse, error) {
-	var volumes []*volume.Volume
+func listenForMounts() {
+	ctx := context.Background()
 
-	for _, mountPoint := range mountPoints {
-		volumes = append(volumes, &volume.Volume{Name: mountPoint.name, Mountpoint: mountPoint.device})
-	}
-
-	return &volume.ListResponse{
-		Volumes: volumes,
-	}, nil
-}
-
-func (d deviceVolumeDriver) Get(request *volume.GetRequest) (*volume.GetResponse, error) {
-	mountPoint, ok := mountPoints[request.Name]
-
-	if !ok {
-		return nil, errors.New("no such volume")
-	}
-
-	return &volume.GetResponse{Volume: &volume.Volume{Name: mountPoint.name, Mountpoint: mountPoint.device}}, nil
-}
-
-func (d deviceVolumeDriver) Remove(request *volume.RemoveRequest) error {
-	delete(mountPoints, request.Name)
-	return nil
-}
-
-func (d deviceVolumeDriver) Path(request *volume.PathRequest) (*volume.PathResponse, error) {
-	mountPoint, ok := mountPoints[request.Name]
-	if !ok {
-		return nil, errors.New("no such volume")
-	}
-	return &volume.PathResponse{Mountpoint: mountPoint.device}, nil
-}
-
-func (d deviceVolumeDriver) Mount(request *volume.MountRequest) (*volume.MountResponse, error) {
-	mountPoint, ok := mountPoints[request.Name]
-
-	if !ok {
-		return nil, errors.New("mountpoint does not exist")
-	}
-
-	go func() {
-		time.Sleep(time.Second * 1)
-		filter := filters.NewArgs(filters.KeyValuePair{Key: "volume", Value: request.Name})
-
-		containers, err := d.ContainerList(
-			context.Background(),
-			types.ContainerListOptions{Filters: filter},
-		)
-
-		if err != nil {
-			log.Println(err)
-			return
-		} else if len(containers) == 0 {
-			log.Println("aborting: could not find container that uses volume " + mountPoint.name)
-			return
-		}
-
-		devicesAllowPath := path.Join("/sys/fs/cgroup/devices/docker", containers[0].ID, "devices.allow")
-
-		if _, err := os.Stat(devicesAllowPath); os.IsNotExist(err) {
-			//return nil, errors.New("could not find cgroup `devices.allow` file for specified container: " + devicesAllowPath)
-			log.Println(errors.New("could not find cgroup `devices.allow` file for specified container: " + devicesAllowPath))
-			return
-		}
-
-		var stat unix.Stat_t
-
-		if err := unix.Lstat(mountPoint.device, &stat); err != nil {
-			//return nil, err
-			log.Println(err)
-			return
-		}
-
-		var deviceType string
-
-		switch stat.Mode & unix.S_IFMT {
-		case unix.S_IFBLK:
-			deviceType = "b"
-		case unix.S_IFCHR:
-			deviceType = "c"
-		default:
-			log.Println("aborting: device is neither a character or block device")
-			return
-		}
-
-		input := fmt.Sprintf("%s %d:%d rwm\n", deviceType, unix.Major(stat.Rdev), unix.Minor(stat.Rdev))
-
-		log.Println("Whitelisting `" + mountPoint.device + "` in `" + devicesAllowPath + "`")
-
-		if err := os.WriteFile(devicesAllowPath, []byte(input), 0400); err != nil {
-			//return nil, err
-			log.Println(err)
-			return
-		}
-	}()
-
-	return &volume.MountResponse{Mountpoint: mountPoint.device}, nil
-}
-
-func (d deviceVolumeDriver) Unmount(request *volume.UnmountRequest) error {
-	return nil
-}
-
-func (d deviceVolumeDriver) Capabilities() *volume.CapabilitiesResponse {
-	return &volume.CapabilitiesResponse{Capabilities: volume.Capability{Scope: "local"}}
-}
-
-func DeviceVolumeDriver() *deviceVolumeDriver {
-	cli, err := client.NewClientWithOpts(client.FromEnv)
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	if cgroups.Mode() == cgroups.Unified {
-		log.Fatal(errors.New("cgroupv2 is not supported"))
+	defer cli.Close()
+
+	msgs, errs := cli.Events(
+		ctx,
+		types.EventsOptions{Filters: filters.NewArgs(filters.Arg("event", "start"))},
+	)
+
+	for {
+		select {
+		case err := <-errs:
+			log.Fatal(err)
+		case msg := <-msgs:
+			info, err := cli.ContainerInspect(ctx, msg.Actor.ID)
+
+			if err != nil {
+				panic(err)
+			} else {
+				pid := info.State.Pid
+				version, err := cgroup.GetDeviceCGroupVersion("/", pid)
+
+				log.Printf("The cgroup version for process %d is: %v\n", pid, version)
+
+				if err != nil {
+					log.Println(err)
+					break
+				}
+
+				log.Printf("Checking mounts for process %d\n", pid)
+
+				for _, mount := range info.Mounts {
+					log.Printf(
+						"%s/%v requested a volume mount for %s at %s\n",
+						msg.Actor.ID, info.State.Pid, mount.Source, mount.Destination,
+					)
+
+					if !strings.HasPrefix(mount.Source, "/dev") {
+						log.Printf("%s is not a device... skipping\n", mount.Source)
+						continue
+					}
+
+					api, err := cgroup.New(version)
+					cgroupPath, sysfsPath, err := api.GetDeviceCGroupMountPath("/", pid)
+
+					if err != nil {
+						log.Println(err)
+						break
+					}
+
+					cgroupPath = path.Join(rootPath, sysfsPath, cgroupPath)
+
+					log.Printf("The cgroup path for process %d is at %v\n", pid, cgroupPath)
+
+					if fileInfo, err := os.Stat(mount.Source); err != nil {
+						log.Println(err)
+						continue
+					} else {
+						if fileInfo.IsDir() {
+							err := filepath.Walk(mount.Source,
+								func(path string, info os.FileInfo, err error) error {
+									if err != nil {
+										return err
+									} else if info.IsDir() {
+										return nil
+									} else if err = applyDeviceRules(api, path, cgroupPath, pid); err != nil {
+										log.Println(err)
+									}
+									return nil
+								})
+							if err != nil {
+								log.Println(err)
+							}
+						} else {
+							if err = applyDeviceRules(api, mount.Source, cgroupPath, pid); err != nil {
+								log.Println(err)
+							}
+						}
+					}
+
+				}
+			}
+		}
+	}
+}
+
+func applyDeviceRules(api cgroup.Interface, mountPath string, cgroupPath string, pid int) error {
+	deviceType, major, minor, err := getDeviceInfo(mountPath)
+
+	if err != nil {
+		log.Println(err)
+		return err
+	} else {
+		log.Printf("Adding device rule for process %d at %s\n", pid, cgroupPath)
+		err = api.AddDeviceRules(cgroupPath, []cgroup.DeviceRule{
+			{
+				Access: "rwm",
+				Major:  Ptr[int64](major),
+				Minor:  Ptr[int64](minor),
+				Type:   deviceType,
+				Allow:  true,
+			},
+		})
+
+		if err != nil {
+			log.Println(err)
+			return err
+		}
 	}
 
-	return &deviceVolumeDriver{cli}
+	return nil
 }

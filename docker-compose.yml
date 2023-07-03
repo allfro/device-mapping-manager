@@ -1,15 +1,21 @@
 version: "3.8"
 
-volumes:
-  fuse:
-    driver: redcanari/device-volume-driver
-    driver_opts:
-      device: /dev/fuse
 
 services:
-  rdesktop:
-    image: lscr.io/linuxserver/rdesktop:ubuntu-xfce
+  dmm:
+    image: docker
+    entrypoint: docker
+    command: |
+      run 
+      -i
+      --name device-manager 
+      --restart always 
+      --privileged 
+      --cgroupns=host 
+      --pid=host 
+      --userns=host 
+      -v /sys:/host/sys 
+      -v /var/run/docker.sock:/var/run/docker.sock 
+      ndouba/device-mapping-manager
     volumes:
-      - fuse:/dev/fuse
-    ports:
-      - 3390:3389
+      - /var/run/docker.sock:/var/run/docker.sock

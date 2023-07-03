@@ -28,6 +28,8 @@
   },
   "Linux": {
     "Capabilities": [
+      "CAP_BPF",
+      "CAP_SYS_PTRACE",
       "CAP_SYS_ADMIN"
     ],
     "AllowAllDevices": true,
@@ -35,19 +37,28 @@
   },
   "Mounts": [
     {
-      "source": "/sys/fs/cgroup/devices",
-      "destination": "/sys/fs/cgroup/devices",
-      "options": [
-        "rw",
-        "rbind"
-      ],
-      "type": "rbind"
-    },
-    {
       "destination": "/dev",
       "source": "/dev",
       "options": [
-        "bind",
+        "rbind",
+        "rw"
+      ],
+      "type": "bind"
+    },
+    {
+      "destination": "/host/sys",
+      "source": "/sys",
+      "options": [
+        "rbind",
+        "rw"
+      ],
+      "type": "bind"
+    },
+    {
+      "destination": "/host/proc",
+      "source": "/proc",
+      "options": [
+        "rbind",
         "rw"
       ],
       "type": "bind"
@@ -66,7 +77,7 @@
   "Network": {
     "Type": ""
   },
-  "PropagatedMount": "/dev",
+  "PropagatedMount": null,
   "User": {},
   "Workdir": "/"
 }
