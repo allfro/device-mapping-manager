@@ -1,7 +1,6 @@
 # device-mapping-manager
 
-This maps and enables devices into containers running on docker swarm. It is currently only compatible with linux systems that use cgroup v1. Contributions
-for cgroupv2 are welcome.
+This maps and enables devices into containers running on docker swarm. It is currently only compatible with linux systems that use cgroup v1 and v2.
 
 # Installation
 
