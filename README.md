@@ -5,7 +5,7 @@ for cgroupv2 are welcome.
 
 # Installation
 
-`docker plugin install redcanari/dvd`
+`docker stack deploy -c docker-compose.yml dmm`
 
 # Usage
 
