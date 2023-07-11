@@ -34,7 +34,7 @@ func main() {
 func getDeviceInfo(devicePath string) (string, int64, int64, error) {
 	var stat unix.Stat_t
 
-	if err := unix.Lstat(devicePath, &stat); err != nil {
+	if err := unix.Stat(devicePath, &stat); err != nil {
 		log.Println(err)
 		return "", -1, -1, err
 	}
