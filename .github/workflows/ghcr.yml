@@ -15,8 +15,14 @@ on:
 jobs:
   push-store-image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
+      - name: "Checkout Repository"
+        uses: actions/checkout@v3
+
       - name: "Login to GitHub Container Registry"
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
